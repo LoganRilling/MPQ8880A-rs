@@ -71,6 +71,15 @@ pub enum MPQFeedBackDividerRatio
     RATIO1_16 = 0b100,
 }
 
+pub struct MPQStatusByte
+{
+    busy: bool,
+    off: bool,
+    output_over_voltage: bool,
+    output_over_current: bool,
+    comms_memory_logic_fault: bool,
+}
+
 pub struct MPQ8880A<I2C>
 {
     i2c: I2C,
@@ -146,6 +155,34 @@ impl<I2C: I2c<SevenBitAddress>> MPQ8880A<I2C>
         self.write_byte(CLEAR_FAULTS);
     }
 
+    pub fn get_status(&mut self) -> MPQStatusByte
+    {
+        let busy: bool;
+        let off: bool;
+        let output_over_voltage: bool;
+        let output_over_current: bool;
+        let comms_memory_logic_fault: bool;
+
+        let status_slice = &mut [0u8];
+
+        self.write_read_byte(MPQCommand::STATUS_BYTE, status_slice);
+
+        busy = (status_slice[0] & 0b10000000) != 0;
+        off = (status_slice[0] & 0b01000000) != 0;
+        output_over_voltage = (status_slice[0] & 0b00100000) != 0;
+        output_over_current = (status_slice[0] & 0b00010000) != 0;
+        comms_memory_logic_fault = (status_slice[0] & 0b00000010) != 0;
+
+        return MPQStatusByte
+        {
+            busy,
+            off,
+            output_over_voltage,
+            output_over_current,
+            comms_memory_logic_fault
+        }
+    }
+
     pub fn set_feedback_divider_ratio(&mut self, ratio: MPQFeedBackDividerRatio)
     {
         self.write_byte_data(MFR_VOUT_CTRL, ratio as u8);
@@ -171,6 +208,11 @@ impl<I2C: I2c<SevenBitAddress>> MPQ8880A<I2C>
         }
     }
 
+    // When reading these voltage and current values, the PMBus delivers a 9-bit multiplier. 
+    // In order to log this, I assume the data comes in 2 bytes, and is separated by how they would be read
+    // Ex: 1110_0010 would be transmitted as 1100 and then 0010. I then use bit shifting to store the value into a u16
+    // If the assumption is incorrect. The 3 read methods below are bugged.
+
     pub fn read_output_voltage(&mut self) -> f32
     {
         let vout_slice = &mut [0u8; 2];
@@ -190,6 +232,22 @@ impl<I2C: I2c<SevenBitAddress>> MPQ8880A<I2C>
         let mut vin: u16 = (vin_slice[0] as u16) << 8;
         vin = vin | (vin_slice[1] as u16);
 
-        return (vin as f32 ) * 0.003 / (2.0.powi(self.feedback_ratio as i32));
+        return (vin as f32 ) * 0.132;
+    }
+
+    pub fn read_output_current(&mut self) -> f32
+    {
+        let iout_slice = &mut [0u8; 2];
+        self.write_read_byte(MPQCommand::READ_IOUT, iout_slice);
+
+        let mut iout: u16 = (iout_slice[0] as u16) << 8;
+        iout = iout | (iout_slice[1] as u16);
+
+        return (iout as f32 ) / (19.0/23.0); // LSB = 23mA in low-dropout mode and when the duty cycle is close to 100%
+    }
+
+    pub fn calculate_power(&mut self) -> f32
+    {
+        return self.read_output_current() * self.read_output_voltage();
     }
 }
