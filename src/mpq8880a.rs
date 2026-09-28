@@ -243,7 +243,7 @@ impl<I2C: I2c<SevenBitAddress>> MPQ8880A<I2C>
         let mut iout: u16 = (iout_slice[0] as u16) << 8;
         iout = iout | (iout_slice[1] as u16);
 
-        return (iout as f32 ) / (19.0/23.0); // LSB = 23mA in low-dropout mode and when the duty cycle is close to 100%
+        return (iout as f32 ) * (19.0/23.0); // LSB = 23mA in low-dropout mode and when the duty cycle is close to 100%
     }
 
     pub fn calculate_power(&mut self) -> f32
